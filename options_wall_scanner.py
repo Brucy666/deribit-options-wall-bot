@@ -1,9 +1,15 @@
 import os
 import requests
 import time
+
 from options_wall_filter import is_valid_wall
 from trap_logger import save_trap, is_repeated_trap
-from strike_cluster import detect_clusters, is_cluster_strike
+from strike_cluster import (
+    detect_clusters,
+    is_cluster_strike,
+    extract_strike
+)
+from cluster_memory import save_cluster_strike, is_repeated_cluster
 
 # Deribit API endpoints
 INSTRUMENTS_API = "https://www.deribit.com/api/v2/public/get_instruments"
@@ -12,7 +18,7 @@ BOOK_API = "https://www.deribit.com/api/v2/public/get_book_summary_by_instrument
 # Discord webhook
 WEBHOOK_URL = os.getenv("DISCORD_OPTIONS_WEBHOOK")
 
-# Fetch all live BTC option symbols
+# Fetch BTC option symbols
 def get_live_btc_option_symbols():
     try:
         response = requests.get(INSTRUMENTS_API, params={
@@ -26,7 +32,7 @@ def get_live_btc_option_symbols():
         print(f"[ERROR] Failed to load instruments: {e}")
         return []
 
-# Fetch option data for a symbol
+# Fetch market data for an instrument
 def fetch_option_wall(symbol):
     try:
         response = requests.get(BOOK_API, params={"instrument_name": symbol})
@@ -45,7 +51,7 @@ def fetch_option_wall(symbol):
         print(f"[ERROR] Failed to fetch {symbol}: {e}")
         return None
 
-# Post alert to Discord
+# Send alert to Discord
 def post_alert(data, repeat=False, cluster=False):
     tags = []
     if repeat:
@@ -71,30 +77,36 @@ def post_alert(data, repeat=False, cluster=False):
     except Exception as e:
         print(f"[ERROR] Failed to post to Discord: {e}")
 
-# Main scanning loop
+# Main loop
 def run_scanner():
     print("[+] Scanning Deribit Options Walls...")
     symbols = get_live_btc_option_symbols()
     valid_walls = []
 
+    # Gather filtered walls
     for symbol in symbols:
         if "-C" in symbol or "-P" in symbol:
             data = fetch_option_wall(symbol)
             if data and is_valid_wall(data):
                 valid_walls.append(data)
-            time.sleep(0.25)  # Rate limit buffer
+            time.sleep(0.25)
 
-    # Detect cluster zones
+    # Detect and store cluster zones
     cluster_strikes = detect_clusters(valid_walls)
+    for c in cluster_strikes:
+        save_cluster_strike(c)
 
-    # Process and post alerts
+    # Post alerts
     for data in valid_walls:
-        repeat = is_repeated_trap(data["symbol"])
-        cluster = is_cluster_strike(data["symbol"], cluster_strikes)
-        post_alert(data, repeat=repeat, cluster=cluster)
+        strike = extract_strike(data["symbol"])
+        is_repeat = is_repeated_trap(data["symbol"])
+        is_cluster = is_cluster_strike(data["symbol"], cluster_strikes)
+        is_cluster_repeat = is_repeated_cluster(strike) if is_cluster else False
+
+        post_alert(data, repeat=(is_repeat or is_cluster_repeat), cluster=is_cluster)
         save_trap(data)
 
 if __name__ == "__main__":
     while True:
         run_scanner()
-        time.sleep(300)  # Wait 5 minutes before next scan
+        time.sleep(300)
