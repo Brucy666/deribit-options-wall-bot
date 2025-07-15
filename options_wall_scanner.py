@@ -1,26 +1,22 @@
+
 import os
 import requests
 import time
 
 from options_wall_filter import is_valid_wall
 from trap_logger import save_trap, is_repeated_trap
-from strike_cluster import (
-    detect_clusters,
-    is_cluster_strike,
-    extract_strike
-)
+from strike_cluster import detect_clusters, is_cluster_strike, extract_strike
 from cluster_memory import save_cluster_strike, is_repeated_cluster
 from heatmap_builder import build_heatmap
 from sniper_score_engine import score_strike
-from rsi_sniper_confluence import is_high_confluence_sniper  # 🧠 NEW
+from rsi_sniper_confluence import is_high_confluence_sniper
 
-# API endpoints
+WEBHOOK_DEFAULT = "https://discord.com/api/webhooks/1393246400275546352/qao3Rw8BaDDlONOV3zp0_zfYEpNiIRXrEZ-UAGFAMcxK0FT_oJXHkFkic4RenmOUe-4Q"
+WEBHOOK_SNIPER = "https://discord.com/api/webhooks/1394793236932857856/10d2BO33Ckf2ouUQ5ClrnZpbxmzsmERA0SzEEkIwvJe1Rq5GGn0LWLS3vRqTOHwd_Qqc"
+
 INSTRUMENTS_API = "https://www.deribit.com/api/v2/public/get_instruments"
 BOOK_API = "https://www.deribit.com/api/v2/public/get_book_summary_by_instrument"
 
-WEBHOOK_URL = os.getenv("DISCORD_OPTIONS_WEBHOOK")
-
-# Load all active BTC options
 def get_live_btc_option_symbols():
     try:
         response = requests.get(INSTRUMENTS_API, params={
@@ -34,7 +30,6 @@ def get_live_btc_option_symbols():
         print(f"[ERROR] Failed to load instruments: {e}")
         return []
 
-# Fetch OI/volume/last for a contract
 def fetch_option_wall(symbol):
     try:
         response = requests.get(BOOK_API, params={"instrument_name": symbol})
@@ -53,8 +48,7 @@ def fetch_option_wall(symbol):
         print(f"[ERROR] Failed to fetch {symbol}: {e}")
         return None
 
-# Send Discord alert
-def post_alert(data, tags, score):
+def post_alert(data, tags, score, webhook_url):
     title = "📊 Deribit BTC Option Wall"
     if tags:
         title += " " + " ".join(tags)
@@ -75,11 +69,10 @@ def post_alert(data, tags, score):
     }
 
     try:
-        requests.post(WEBHOOK_URL, json=payload)
+        requests.post(webhook_url, json=payload)
     except Exception as e:
         print(f"[ERROR] Failed to post to Discord: {e}")
 
-# Main loop
 def run_scanner():
     print("[+] Scanning Deribit Options Walls...")
     symbols = get_live_btc_option_symbols()
@@ -104,9 +97,8 @@ def run_scanner():
         is_cluster = is_cluster_strike(data["symbol"], cluster_strikes)
         is_cluster_repeat = is_repeated_cluster(strike) if is_cluster else False
         score = score_strike(data)
-        sniper_ready = is_high_confluence_sniper(data["symbol"])  # 🧠 Confluence logic
+        sniper_ready = is_high_confluence_sniper(data["symbol"])
 
-        # Build tag list
         tags = []
         if is_repeat or is_cluster_repeat:
             tags.append("⚠️ Repeated Wall")
@@ -119,7 +111,8 @@ def run_scanner():
         if sniper_ready:
             tags.append("🧠 RSI + Options")
 
-        post_alert(data, tags, score)
+        webhook = WEBHOOK_SNIPER if sniper_ready else WEBHOOK_DEFAULT
+        post_alert(data, tags, score, webhook)
         save_trap(data)
 
 if __name__ == "__main__":
