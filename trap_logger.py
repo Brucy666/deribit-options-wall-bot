@@ -4,7 +4,7 @@ from datetime import datetime
 
 LOG_FILE = "trap_memory.json"
 
-# Save trap to memory
+# Save trap to local memory
 def save_trap(data):
     trap = {
         "symbol": data["symbol"],
@@ -14,7 +14,7 @@ def save_trap(data):
         "timestamp": datetime.utcnow().isoformat()
     }
 
-    # Load existing
+    # Load existing trap memory
     if os.path.exists(LOG_FILE):
         with open(LOG_FILE, "r") as f:
             memory = json.load(f)
@@ -26,9 +26,10 @@ def save_trap(data):
     with open(LOG_FILE, "w") as f:
         json.dump(memory, f, indent=2)
 
-# Optional: Load for comparison
-def load_traps():
+# Check if the wall has appeared before
+def is_repeated_trap(symbol):
     if os.path.exists(LOG_FILE):
         with open(LOG_FILE, "r") as f:
-            return json.load(f)
-    return []
+            memory = json.load(f)
+        return any(trap["symbol"] == symbol for trap in memory)
+    return False
