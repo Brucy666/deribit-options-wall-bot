@@ -1,6 +1,7 @@
 import os
 import requests
 import time
+from options_wall_filter import is_valid_wall
 
 # Deribit API endpoints
 INSTRUMENTS_API = "https://www.deribit.com/api/v2/public/get_instruments"
@@ -63,13 +64,13 @@ def run_scanner():
     print("[+] Scanning Deribit Options Walls...")
     symbols = get_live_btc_option_symbols()
     for symbol in symbols:
-        if "-C" in symbol or "-P" in symbol:  # Optional: skip some
+        if "-C" in symbol or "-P" in symbol:
             data = fetch_option_wall(symbol)
-            if data and data["open_interest"] > 0:
+            if data and is_valid_wall(data):
                 post_alert(data)
-            time.sleep(0.25)  # Rate limit
+            time.sleep(0.25)
 
 if __name__ == "__main__":
     while True:
         run_scanner()
-        time.sleep(300)  # Scan every 5 minutes
+        time.sleep(300)
