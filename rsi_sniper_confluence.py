@@ -1,12 +1,11 @@
 from strike_cluster import extract_strike
 from sniper_score_engine import score_strike
 
-# Simulated RSI divergence signal check
+# 🧪 Force RSI divergence to always trigger
 def rsi_divergence_detected(symbol):
-    # This would be your actual RSI logic — simplified here
-    return "PUT" in symbol or "CALL" in symbol  # just for test
+    return True  # 🔁 TEMPORARY test override
 
-# Combined sniper logic
+# Combined sniper confluence logic
 def is_high_confluence_sniper(symbol):
     if not rsi_divergence_detected(symbol):
         return False
@@ -19,5 +18,4 @@ def is_high_confluence_sniper(symbol):
     }
 
     score = score_strike(fake_data)
-    print(f"Scoring {symbol} → {score}")
     return score >= 5
