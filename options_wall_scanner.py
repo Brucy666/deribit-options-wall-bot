@@ -1,75 +1,75 @@
 import os
 import requests
 import time
-import json
 
-DERIBIT_API = "https://www.deribit.com/api/v2/public/get_book_summary_by_instrument"
+# Deribit API endpoints
+INSTRUMENTS_API = "https://www.deribit.com/api/v2/public/get_instruments"
+BOOK_API = "https://www.deribit.com/api/v2/public/get_book_summary_by_instrument"
 
-# ✅ Live options (as of 11 July 2025 — weekly, next-week, and monthly)
-INSTRUMENTS = [
-    "BTC-19JUL24-60000-C",
-    "BTC-19JUL24-50000-P",
-    "BTC-26JUL24-65000-C",
-    "BTC-26JUL24-47000-P",
-    "BTC-30AUG24-70000-C",
-    "BTC-30AUG24-45000-P",
-]
-
+# Discord webhook
 WEBHOOK_URL = os.getenv("DISCORD_OPTIONS_WEBHOOK")
 
+# Load live BTC option instruments
+def get_live_btc_option_symbols():
+    try:
+        response = requests.get(INSTRUMENTS_API, params={
+            "currency": "BTC",
+            "kind": "option",
+            "expired": "false"
+        })
+        data = response.json().get("result", [])
+        symbols = [item["instrument_name"] for item in data]
+        return symbols
+    except Exception as e:
+        print(f"[ERROR] Failed to load instruments: {e}")
+        return []
+
+# Fetch OI, volume, and last price for a given option
 def fetch_option_wall(symbol):
     try:
-        response = requests.get(DERIBIT_API, params={"instrument_name": symbol})
-        data = response.json()["result"][0]
+        response = requests.get(BOOK_API, params={"instrument_name": symbol})
+        result = response.json().get("result")
+        if not result:
+            print(f"[!] No result for {symbol}")
+            return None
+        data = result[0]
         return {
             "symbol": symbol,
             "open_interest": data.get("open_interest", 0),
             "volume": data.get("volume", 0),
-            "last": data.get("last", 0)
+            "last": data.get("last_price", 0)
         }
     except Exception as e:
-        print(f"Failed to fetch {symbol}: {e}")
+        print(f"[ERROR] Failed to fetch {symbol}: {e}")
         return None
 
+# Send formatted alert to Discord
 def post_alert(data):
     payload = {
         "username": "Deribit Options Bot",
-        "embeds": [
-            {
-                "title": "🟣 Options Wall Detected",
-                "description": (
-                    f"**Symbol:** `{data['symbol']}`\n"
-                    f"**Open Interest:** `{data['open_interest']}`\n"
-                    f"**Volume:** `{data['volume']}`\n"
-                    f"**Last Price:** `{data['last']}`"
-                ),
-                "color": 10070709  # Purple
-            }
-        ]
+        "embeds": [{
+            "title": f"📊 Deribit BTC Option Wall",
+            "description": f"**{data['symbol']}**\nOI: `{data['open_interest']}`\nVolume: `{data['volume']}`\nLast: `{data['last']}`",
+            "color": 5814783
+        }]
     }
     try:
-        requests.post(WEBHOOK_URL, data=json.dumps(payload), headers={"Content-Type": "application/json"})
+        requests.post(WEBHOOK_URL, json=payload)
     except Exception as e:
-        print(f"Webhook error: {e}")
+        print(f"[ERROR] Failed to post to Discord: {e}")
 
-def scan_option_walls():
-    for symbol in INSTRUMENTS:
-        data = fetch_option_wall(symbol)
-        if not data:
-            continue
-
-        # 🧠 Scoring logic
-        score = 0
-        if data["open_interest"] > 100:
-            score += 1
-        if data["volume"] > 50:
-            score += 1
-
-        if score >= 2:
-            post_alert(data)
+# Main loop
+def run_scanner():
+    print("[+] Scanning Deribit Options Walls...")
+    symbols = get_live_btc_option_symbols()
+    for symbol in symbols:
+        if "-C" in symbol or "-P" in symbol:  # Optional: skip some
+            data = fetch_option_wall(symbol)
+            if data and data["open_interest"] > 0:
+                post_alert(data)
+            time.sleep(0.25)  # Rate limit
 
 if __name__ == "__main__":
     while True:
-        print("[+] Scanning Deribit Options Walls...")
-        scan_option_walls()
-        time.sleep(300)  # every 5 minutes
+        run_scanner()
+        time.sleep(300)  # Scan every 5 minutes
