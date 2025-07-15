@@ -1,9 +1,8 @@
 import os
 import requests
-from datetime import datetime
 from top_strikes_report import generate_top_strike_report
 
-WEBHOOK_URL = os.getenv("DISCORD_OPTIONS_WEBHOOK")
+WEBHOOK_URL = "https://discord.com/api/webhooks/1394793145400823909/ny0lkqtyJ1rfs1Zf2LPN2s_Ln9CWGC02mF4ltzzsMtd7RSgMBNalvXp17PwYfSVF4tFr"
 REPORT_FILE = "top_strikes_report.txt"
 
 def post_daily_report():
@@ -18,7 +17,7 @@ def post_daily_report():
 
     payload = {
         "username": "Sniper Report Bot",
-        "content": f"📊 **Daily Top Sniper Strikes**\n```{content}```"
+        "content": f"📊 **Daily Top Sniper Strikes**\n```{content[:1900]}```"
     }
 
     try:
@@ -26,3 +25,6 @@ def post_daily_report():
         print("✅ Report posted to Discord.")
     except Exception as e:
         print(f"[ERROR] Failed to post report: {e}")
+
+if __name__ == "__main__":
+    post_daily_report()
