@@ -12,15 +12,15 @@ from strike_cluster import (
 from cluster_memory import save_cluster_strike, is_repeated_cluster
 from heatmap_builder import build_heatmap
 from sniper_score_engine import score_strike
+from rsi_sniper_confluence import is_high_confluence_sniper  # 🧠 NEW
 
-# API Endpoints
+# API endpoints
 INSTRUMENTS_API = "https://www.deribit.com/api/v2/public/get_instruments"
 BOOK_API = "https://www.deribit.com/api/v2/public/get_book_summary_by_instrument"
 
-# Discord webhook
 WEBHOOK_URL = os.getenv("DISCORD_OPTIONS_WEBHOOK")
 
-# Get all active BTC option contracts
+# Load all active BTC options
 def get_live_btc_option_symbols():
     try:
         response = requests.get(INSTRUMENTS_API, params={
@@ -34,7 +34,7 @@ def get_live_btc_option_symbols():
         print(f"[ERROR] Failed to load instruments: {e}")
         return []
 
-# Get market data for a single contract
+# Fetch OI/volume/last for a contract
 def fetch_option_wall(symbol):
     try:
         response = requests.get(BOOK_API, params={"instrument_name": symbol})
@@ -53,7 +53,7 @@ def fetch_option_wall(symbol):
         print(f"[ERROR] Failed to fetch {symbol}: {e}")
         return None
 
-# Build and send alert
+# Send Discord alert
 def post_alert(data, tags, score):
     title = "📊 Deribit BTC Option Wall"
     if tags:
@@ -92,20 +92,21 @@ def run_scanner():
                 valid_walls.append(data)
             time.sleep(0.25)
 
-    # Detect clusters and rebuild heatmap
     cluster_strikes = detect_clusters(valid_walls)
     for c in cluster_strikes:
         save_cluster_strike(c)
+
     build_heatmap()
 
-    # Score and alert
     for data in valid_walls:
         strike = extract_strike(data["symbol"])
         is_repeat = is_repeated_trap(data["symbol"])
         is_cluster = is_cluster_strike(data["symbol"], cluster_strikes)
         is_cluster_repeat = is_repeated_cluster(strike) if is_cluster else False
         score = score_strike(data)
+        sniper_ready = is_high_confluence_sniper(data["symbol"])  # 🧠 Confluence logic
 
+        # Build tag list
         tags = []
         if is_repeat or is_cluster_repeat:
             tags.append("⚠️ Repeated Wall")
@@ -115,6 +116,8 @@ def run_scanner():
             tags.append(f"🔥 Score: {score}")
         elif score >= 2:
             tags.append(f"⭐ Score: {score}")
+        if sniper_ready:
+            tags.append("🧠 RSI + Options")
 
         post_alert(data, tags, score)
         save_trap(data)
