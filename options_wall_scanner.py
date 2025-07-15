@@ -2,6 +2,7 @@ import os
 import requests
 import time
 from options_wall_filter import is_valid_wall
+from trap_logger import save_trap
 
 # Deribit API endpoints
 INSTRUMENTS_API = "https://www.deribit.com/api/v2/public/get_instruments"
@@ -68,6 +69,7 @@ def run_scanner():
             data = fetch_option_wall(symbol)
             if data and is_valid_wall(data):
                 post_alert(data)
+                save_trap(data)
             time.sleep(0.25)
 
 if __name__ == "__main__":
