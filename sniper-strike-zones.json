@@ -1,0 +1,18 @@
+import json
+
+CLUSTER_LOG = "cluster_memory.json"
+OUTPUT = "sniper-strike-zones.json"
+
+def export_strike_zones():
+    if not os.path.exists(CLUSTER_LOG):
+        return
+
+    with open(CLUSTER_LOG) as f:
+        clusters = json.load(f)
+
+    unique_strikes = sorted({int(entry["strike"]) for entry in clusters})
+
+    export = [{"price": s, "label": f"Strike {s}"} for s in unique_strikes]
+
+    with open(OUTPUT, "w") as f:
+        json.dump(export, f, indent=2)
