@@ -1,7 +1,6 @@
-import os
 import time
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 
 from options_wall_filter import is_valid_wall
 from trap_logger import save_trap, is_repeated_trap
@@ -14,33 +13,30 @@ from options_wall_memory_tracker import update_wall_memory
 from options_sniper_export import export_sniper_wall_snapshot
 from options_wall_bias_engine import score_wall_bias
 from options_discord_summary_builder import build_wall_summary
+from options_trap_detector import detect_trap_wall  # ✅ ADDED
 
 # Discord Webhooks
 WEBHOOK_DEFAULT = "https://discord.com/api/webhooks/1393246400275546352/qao3Rw8BaDDlONOV3zp0_zfYEpNiIRXrEZ-UAGFAMcxK0FT_oJXHkFkic4RenmOUe-4Q"
 WEBHOOK_SNIPER = "https://discord.com/api/webhooks/1394793236932857856/10d2BO33Ckf2ouUQ5ClrnZpbxmzsmERA0SzEEkIwvJe1Rq5GGn0LWLS3vRqTOHwd_Qqc"
 
-# Deribit APIs
 INSTRUMENTS_API = "https://www.deribit.com/api/v2/public/get_instruments"
 BOOK_API = "https://www.deribit.com/api/v2/public/get_book_summary_by_instrument"
 
 def get_live_btc_option_symbols():
     try:
-        response = requests.get(INSTRUMENTS_API, params={
-            "currency": "BTC", "kind": "option", "expired": "false"
-        })
-        return [item["instrument_name"] for item in response.json().get("result", [])]
+        res = requests.get(INSTRUMENTS_API, params={"currency": "BTC", "kind": "option", "expired": "false"})
+        return [x["instrument_name"] for x in res.json().get("result", [])]
     except Exception as e:
-        print(f"[ERROR] Loading instruments: {e}")
+        print(f"[ERROR] get_live_btc_option_symbols: {e}")
         return []
 
 def fetch_option_wall(symbol):
     try:
-        response = requests.get(BOOK_API, params={"instrument_name": symbol})
-        result = response.json().get("result", [{}])[0]
-
+        res = requests.get(BOOK_API, params={"instrument_name": symbol})
+        result = res.json().get("result", [{}])[0]
         parts = symbol.split("-")
         if len(parts) != 4:
-            raise ValueError(f"Bad symbol format: {symbol}")
+            return None
 
         expiry = parts[1]
         strike = float(parts[2])
@@ -55,36 +51,33 @@ def fetch_option_wall(symbol):
             "volume": result.get("volume", 0),
             "last": result.get("last_price", 0)
         }
-
     except Exception as e:
-        print(f"[ERROR] Fetching {symbol}: {e}")
+        print(f"[ERROR] fetch_option_wall({symbol}): {e}")
         return None
 
-def post_alert(data, tags, score, webhook_url):
+def post_alert(wall, tags, score, webhook):
     title = "📊 Deribit BTC Option Wall " + " ".join(tags)
     color = 16734296 if score >= 5 else 15158332 if "⚠️ Repeated Wall" in tags else 5814783
-
     payload = {
         "username": "Deribit Options Bot",
         "embeds": [{
             "title": title,
             "description": (
-                f"**{data['symbol']}**\n"
-                f"OI: `{data['open_interest']}`\n"
-                f"Volume: `{data['volume']}`\n"
-                f"Last: `{data['last']}`"
+                f"**{wall['symbol']}**\n"
+                f"OI: `{wall['open_interest']}`\n"
+                f"Volume: `{wall['volume']}`\n"
+                f"Last: `{wall['last']}`"
             ),
             "color": color
         }]
     }
-
     try:
-        requests.post(webhook_url, json=payload)
+        requests.post(webhook, json=payload)
     except Exception as e:
-        print(f"[ERROR] Posting to Discord: {e}")
+        print(f"[ERROR] Discord post failed: {e}")
 
 def run_scanner():
-    print(f"[{datetime.utcnow().strftime('%H:%M:%S')}] Scanning Deribit Options Walls...")
+    print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Scanning Deribit Options Walls...")
     symbols = get_live_btc_option_symbols()
     valid_walls = []
 
@@ -120,6 +113,12 @@ def run_scanner():
         score = score_strike(wall)
         sniper_ready = is_high_confluence_sniper(wall["symbol"])
 
+        # ⚠️ RSI values from feed — mock here or use real data
+        rsi_fast = 67  # ← replace with real feed
+        rsi_slow = 65
+
+        trap = detect_trap_wall(wall, wall_memory, current_price, rsi_fast, rsi_slow)
+
         tags = []
         if is_repeat or is_cluster_repeat:
             tags.append("⚠️ Repeated Wall")
@@ -131,6 +130,9 @@ def run_scanner():
             tags.append(f"⭐ Score: {score}")
         if sniper_ready:
             tags.append("🧠 RSI + Options")
+        if trap["is_trap"]:
+            tags.append("🚨 Trap Risk")
+            print(trap["reason"])
         if bias_report["bias"] == "bullish":
             tags.append("🟢 Bullish Bias")
         elif bias_report["bias"] == "bearish":
