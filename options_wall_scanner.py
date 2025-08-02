@@ -10,10 +10,13 @@ from heatmap_builder import build_heatmap
 from sniper_score_engine import score_strike
 from rsi_sniper_confluence import is_high_confluence_sniper
 from options_wall_memory_tracker import update_wall_memory
+from options_sniper_export import export_sniper_wall_snapshot
 
+# Discord webhooks
 WEBHOOK_DEFAULT = "https://discord.com/api/webhooks/1393246400275546352/qao3Rw8BaDDlONOV3zp0_zfYEpNiIRXrEZ-UAGFAMcxK0FT_oJXHkFkic4RenmOUe-4Q"
 WEBHOOK_SNIPER = "https://discord.com/api/webhooks/1394793236932857856/10d2BO33Ckf2ouUQ5ClrnZpbxmzsmERA0SzEEkIwvJe1Rq5GGn0LWLS3vRqTOHwd_Qqc"
 
+# Deribit APIs
 INSTRUMENTS_API = "https://www.deribit.com/api/v2/public/get_instruments"
 BOOK_API = "https://www.deribit.com/api/v2/public/get_book_summary_by_instrument"
 
@@ -52,10 +55,16 @@ def post_alert(data, tags, score, webhook_url):
         "username": "Deribit Options Bot",
         "embeds": [{
             "title": title,
-            "description": f"**{data['symbol']}**\nOI: `{data['open_interest']}`\nVolume: `{data['volume']}`\nLast: `{data['last']}`",
+            "description": (
+                f"**{data['symbol']}**\n"
+                f"OI: `{data['open_interest']}`\n"
+                f"Volume: `{data['volume']}`\n"
+                f"Last: `{data['last']}`"
+            ),
             "color": color
         }]
     }
+
     try:
         requests.post(webhook_url, json=payload)
     except Exception as e:
@@ -74,11 +83,20 @@ def run_scanner():
                 valid_walls.append(data)
             time.sleep(0.25)
 
+    # Detect clusters
     cluster_strikes = detect_clusters(valid_walls)
 
-    current_price = sum([w["last"] for w in valid_walls if w["last"] > 0]) / max(1, len(valid_walls))
-    update_wall_memory(valid_walls, current_price)
+    # Estimate spot price
+    price_list = [w["last"] for w in valid_walls if w["last"] > 0]
+    current_price = sum(price_list) / max(1, len(price_list))
 
+    # Update wall memory
+    wall_memory = update_wall_memory(valid_walls, current_price)
+
+    # Export sniper-friendly JSON
+    export_sniper_wall_snapshot(valid_walls, wall_memory, current_price)
+
+    # Save strike clusters
     for strike in cluster_strikes:
         save_cluster_strike(strike)
     build_heatmap()
