@@ -14,9 +14,10 @@ from options_sniper_export import export_sniper_wall_snapshot
 from options_wall_bias_engine import score_wall_bias
 from options_discord_summary_builder import build_wall_summary
 from options_trap_detector import detect_trap_wall
-from major_wall_detector import get_major_call_put_walls  # ✅ new
+from major_wall_detector import get_major_call_put_walls
+from major_wall_alert import post_major_wall_alert
 
-# Discord webhooks
+# Discord Webhooks
 WEBHOOK_DEFAULT = "https://discord.com/api/webhooks/1393246400275546352/qao3Rw8BaDDlONOV3zp0_zfYEpNiIRXrEZ-UAGFAMcxK0FT_oJXHkFkic4RenmOUe-4Q"
 WEBHOOK_SNIPER = "https://discord.com/api/webhooks/1394793236932857856/10d2BO33Ckf2ouUQ5ClrnZpbxmzsmERA0SzEEkIwvJe1Rq5GGn0LWLS3vRqTOHwd_Qqc"
 
@@ -94,20 +95,19 @@ def run_scanner():
     cluster_strikes = detect_clusters(valid_walls)
     current_price = sum([w["last"] for w in valid_walls if w["last"] > 0]) / max(1, len(valid_walls))
 
+    # 🧠 Main processing steps
     wall_memory = update_wall_memory(valid_walls, current_price)
     export_sniper_wall_snapshot(valid_walls, wall_memory, current_price)
     build_wall_summary(current_price, wall_memory)
     bias_report = score_wall_bias(current_price, wall_memory)
 
-    # ✅ Major wall detection
+    # 📊 Major wall scan + Discord alert
     major = get_major_call_put_walls(wall_memory, current_price)
-    if major["call"]:
-        print(f"🟢 CALL Wall: {major['call']['strike']} | OI: {major['call']['oi']:.1f}")
-    if major["put"]:
-        print(f"🔴 PUT Wall:  {major['put']['strike']} | OI: {major['put']['oi']:.1f}")
+    post_major_wall_alert(major["call"], major["put"], current_price)
 
     for strike in cluster_strikes:
         save_cluster_strike(strike)
+
     build_heatmap()
 
     for wall in valid_walls:
@@ -118,6 +118,7 @@ def run_scanner():
         score = score_strike(wall)
         sniper_ready = is_high_confluence_sniper(wall["symbol"])
 
+        # Simulated RSI inputs for trap detection (use real feed if ready)
         rsi_fast = 67
         rsi_slow = 65
         trap = detect_trap_wall(wall, wall_memory, current_price, rsi_fast, rsi_slow)
