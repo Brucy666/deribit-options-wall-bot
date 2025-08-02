@@ -1,7 +1,6 @@
-
 import os
-import requests
 import time
+import requests
 
 from options_wall_filter import is_valid_wall
 from trap_logger import save_trap, is_repeated_trap
@@ -10,6 +9,7 @@ from cluster_memory import save_cluster_strike, is_repeated_cluster
 from heatmap_builder import build_heatmap
 from sniper_score_engine import score_strike
 from rsi_sniper_confluence import is_high_confluence_sniper
+from options_wall_memory_tracker import update_wall_memory
 
 WEBHOOK_DEFAULT = "https://discord.com/api/webhooks/1393246400275546352/qao3Rw8BaDDlONOV3zp0_zfYEpNiIRXrEZ-UAGFAMcxK0FT_oJXHkFkic4RenmOUe-4Q"
 WEBHOOK_SNIPER = "https://discord.com/api/webhooks/1394793236932857856/10d2BO33Ckf2ouUQ5ClrnZpbxmzsmERA0SzEEkIwvJe1Rq5GGn0LWLS3vRqTOHwd_Qqc"
@@ -17,47 +17,36 @@ WEBHOOK_SNIPER = "https://discord.com/api/webhooks/1394793236932857856/10d2BO33C
 INSTRUMENTS_API = "https://www.deribit.com/api/v2/public/get_instruments"
 BOOK_API = "https://www.deribit.com/api/v2/public/get_book_summary_by_instrument"
 
+
 def get_live_btc_option_symbols():
     try:
         response = requests.get(INSTRUMENTS_API, params={
-            "currency": "BTC",
-            "kind": "option",
-            "expired": "false"
+            "currency": "BTC", "kind": "option", "expired": "false"
         })
-        data = response.json().get("result", [])
-        return [item["instrument_name"] for item in data]
+        return [item["instrument_name"] for item in response.json().get("result", [])]
     except Exception as e:
-        print(f"[ERROR] Failed to load instruments: {e}")
+        print(f"[ERROR] Loading instruments: {e}")
         return []
+
 
 def fetch_option_wall(symbol):
     try:
         response = requests.get(BOOK_API, params={"instrument_name": symbol})
-        result = response.json().get("result")
-        if not result:
-            print(f"[!] No result for {symbol}")
-            return None
-        data = result[0]
+        result = response.json().get("result", [{}])[0]
         return {
             "symbol": symbol,
-            "open_interest": data.get("open_interest", 0),
-            "volume": data.get("volume", 0),
-            "last": data.get("last_price", 0)
+            "open_interest": result.get("open_interest", 0),
+            "volume": result.get("volume", 0),
+            "last": result.get("last_price", 0)
         }
     except Exception as e:
-        print(f"[ERROR] Failed to fetch {symbol}: {e}")
+        print(f"[ERROR] Fetching {symbol}: {e}")
         return None
 
-def post_alert(data, tags, score, webhook_url):
-    title = "📊 Deribit BTC Option Wall"
-    if tags:
-        title += " " + " ".join(tags)
 
-    color = (
-        16734296 if score >= 5 else
-        15158332 if "⚠️ Repeated Wall" in tags or "🎯 Cluster Strike" in tags else
-        5814783
-    )
+def post_alert(data, tags, score, webhook_url):
+    title = "📊 Deribit BTC Option Wall " + " ".join(tags)
+    color = 16734296 if score >= 5 else 15158332 if "⚠️ Repeated Wall" in tags else 5814783
 
     payload = {
         "username": "Deribit Options Bot",
@@ -67,11 +56,11 @@ def post_alert(data, tags, score, webhook_url):
             "color": color
         }]
     }
-
     try:
         requests.post(webhook_url, json=payload)
     except Exception as e:
-        print(f"[ERROR] Failed to post to Discord: {e}")
+        print(f"[ERROR] Posting to Discord: {e}")
+
 
 def run_scanner():
     print("[+] Scanning Deribit Options Walls...")
@@ -86,9 +75,12 @@ def run_scanner():
             time.sleep(0.25)
 
     cluster_strikes = detect_clusters(valid_walls)
-    for c in cluster_strikes:
-        save_cluster_strike(c)
 
+    current_price = sum([w["last"] for w in valid_walls if w["last"] > 0]) / max(1, len(valid_walls))
+    update_wall_memory(valid_walls, current_price)
+
+    for strike in cluster_strikes:
+        save_cluster_strike(strike)
     build_heatmap()
 
     for data in valid_walls:
@@ -114,6 +106,7 @@ def run_scanner():
         webhook = WEBHOOK_SNIPER if sniper_ready else WEBHOOK_DEFAULT
         post_alert(data, tags, score, webhook)
         save_trap(data)
+
 
 if __name__ == "__main__":
     while True:
