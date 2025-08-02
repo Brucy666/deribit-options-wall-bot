@@ -13,9 +13,8 @@ from options_wall_memory_tracker import update_wall_memory
 from options_sniper_export import export_sniper_wall_snapshot
 from options_wall_bias_engine import score_wall_bias
 from options_discord_summary_builder import build_wall_summary
-from options_trap_detector import detect_trap_wall  # ✅ ADDED
+from options_trap_detector import detect_trap_wall
 
-# Discord Webhooks
 WEBHOOK_DEFAULT = "https://discord.com/api/webhooks/1393246400275546352/qao3Rw8BaDDlONOV3zp0_zfYEpNiIRXrEZ-UAGFAMcxK0FT_oJXHkFkic4RenmOUe-4Q"
 WEBHOOK_SNIPER = "https://discord.com/api/webhooks/1394793236932857856/10d2BO33Ckf2ouUQ5ClrnZpbxmzsmERA0SzEEkIwvJe1Rq5GGn0LWLS3vRqTOHwd_Qqc"
 
@@ -37,12 +36,11 @@ def fetch_option_wall(symbol):
         parts = symbol.split("-")
         if len(parts) != 4:
             return None
-
         expiry = parts[1]
         strike = float(parts[2])
         opt_type = parts[3]
 
-        return {
+        wall = {
             "symbol": symbol,
             "strike": strike,
             "type": opt_type,
@@ -51,6 +49,8 @@ def fetch_option_wall(symbol):
             "volume": result.get("volume", 0),
             "last": result.get("last_price", 0)
         }
+        print("[DEBUG] WALL:", wall)
+        return wall
     except Exception as e:
         print(f"[ERROR] fetch_option_wall({symbol}): {e}")
         return None
@@ -72,6 +72,7 @@ def post_alert(wall, tags, score, webhook):
         }]
     }
     try:
+        print(f"[POST] Alerting: {wall['symbol']} Tags: {tags}")
         requests.post(webhook, json=payload)
     except Exception as e:
         print(f"[ERROR] Discord post failed: {e}")
@@ -84,7 +85,9 @@ def run_scanner():
     for symbol in symbols:
         if "-C" in symbol or "-P" in symbol:
             wall = fetch_option_wall(symbol)
-            if wall and is_valid_wall(wall):
+            if wall:
+                # REMOVE filter temporarily to test webhook flow
+                # if is_valid_wall(wall):
                 valid_walls.append(wall)
             time.sleep(0.25)
 
@@ -112,11 +115,8 @@ def run_scanner():
         is_cluster_repeat = is_repeated_cluster(strike) if is_cluster else False
         score = score_strike(wall)
         sniper_ready = is_high_confluence_sniper(wall["symbol"])
-
-        # ⚠️ RSI values from feed — mock here or use real data
-        rsi_fast = 67  # ← replace with real feed
+        rsi_fast = 66  # fake values for trap testing
         rsi_slow = 65
-
         trap = detect_trap_wall(wall, wall_memory, current_price, rsi_fast, rsi_slow)
 
         tags = []
