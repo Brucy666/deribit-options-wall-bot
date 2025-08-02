@@ -1,53 +1,50 @@
-import json
-import os
 from datetime import datetime
 
-MEMORY_FILE = "wall_state.json"
+# In-memory store of seen walls
+wall_memory = {}
 
-def load_wall_memory():
-    if os.path.exists(MEMORY_FILE):
-        with open(MEMORY_FILE, "r") as f:
-            return json.load(f)
-    return {}
-
-def save_wall_memory(memory):
-    with open(MEMORY_FILE, "w") as f:
-        json.dump(memory, f, indent=2)
-
-def update_wall_memory(current_walls, price):
+def update_wall_memory(walls, current_price):
     """
-    Updates wall_state.json with current wall info.
-
-    Each wall should be a dict:
-    {
-        "strike": 49000,
-        "type": "C",  # or "P"
-        "expiry": "2025-08-15",
-        "oi": 5400,
-        "volume": 120.5
-    }
+    Updates memory store with newly scanned walls.
+    Tracks open interest, strike, type, and how many times seen.
     """
-    memory = load_wall_memory()
-    now = datetime.utcnow().isoformat()
+    global wall_memory
+    now = datetime.utcnow().strftime('%Y-%m-%d %H:%M')
 
-    for wall in current_walls:
-        key = f"{wall['strike']}-{wall['type']}-{wall['expiry']}"
-        if key in memory:
-            memory[key]["seen_count"] += 1
-            memory[key]["last_seen"] = now
-            memory[key]["last_price"] = price
-        else:
-            memory[key] = {
-                "strike": wall["strike"],
-                "type": wall["type"],
-                "expiry": wall["expiry"],
-                "oi": wall["oi"],
-                "volume": wall["volume"],
-                "first_seen": now,
-                "last_seen": now,
+    for wall in walls:
+        # ✅ Safety: ensure it's a valid dict with required keys
+        if not isinstance(wall, dict) or not all(k in wall for k in ["strike", "type", "expiry", "open_interest"]):
+            print("[SKIP] Malformed wall:", wall)
+            continue
+
+        try:
+            strike = float(wall["strike"])
+            opt_type = wall["type"]
+            expiry = wall["expiry"]
+            oi = float(wall["open_interest"])
+        except Exception as e:
+            print(f"[ERROR] Parsing wall: {e}")
+            continue
+
+        key = f"{strike}-{opt_type}-{expiry}"
+
+        if key not in wall_memory:
+            wall_memory[key] = {
+                "strike": strike,
+                "type": opt_type,
+                "expiry": expiry,
                 "seen_count": 1,
-                "last_price": price
+                "oi": oi,
+                "last_seen": now,
+                "first_seen": now,
+                "last_price": current_price
             }
+        else:
+            wall_memory[key]["seen_count"] += 1
+            wall_memory[key]["last_seen"] = now
+            wall_memory[key]["oi"] = oi
+            wall_memory[key]["last_price"] = current_price
 
-    save_wall_memory(memory)
-    return memory
+        print(f"[MEMORY] Seen {key} → x{wall_memory[key]['seen_count']}")
+
+    return wall_memory
