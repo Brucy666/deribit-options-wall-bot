@@ -15,11 +15,14 @@ from options_wall_bias_engine import score_wall_bias
 from options_discord_summary_builder import build_wall_summary
 from options_trap_detector import detect_trap_wall
 
+# Webhooks
 WEBHOOK_DEFAULT = "https://discord.com/api/webhooks/1393246400275546352/qao3Rw8BaDDlONOV3zp0_zfYEpNiIRXrEZ-UAGFAMcxK0FT_oJXHkFkic4RenmOUe-4Q"
 WEBHOOK_SNIPER = "https://discord.com/api/webhooks/1394793236932857856/10d2BO33Ckf2ouUQ5ClrnZpbxmzsmERA0SzEEkIwvJe1Rq5GGn0LWLS3vRqTOHwd_Qqc"
 
+# Deribit endpoints
 INSTRUMENTS_API = "https://www.deribit.com/api/v2/public/get_instruments"
 BOOK_API = "https://www.deribit.com/api/v2/public/get_book_summary_by_instrument"
+
 
 def get_live_btc_option_symbols():
     try:
@@ -29,6 +32,7 @@ def get_live_btc_option_symbols():
         print(f"[ERROR] get_live_btc_option_symbols: {e}")
         return []
 
+
 def fetch_option_wall(symbol):
     try:
         res = requests.get(BOOK_API, params={"instrument_name": symbol})
@@ -36,28 +40,24 @@ def fetch_option_wall(symbol):
         parts = symbol.split("-")
         if len(parts) != 4:
             return None
-        expiry = parts[1]
-        strike = float(parts[2])
-        opt_type = parts[3]
-
-        wall = {
+        return {
             "symbol": symbol,
-            "strike": strike,
-            "type": opt_type,
-            "expiry": expiry,
+            "strike": float(parts[2]),
+            "type": parts[3],
+            "expiry": parts[1],
             "open_interest": result.get("open_interest", 0),
             "volume": result.get("volume", 0),
             "last": result.get("last_price", 0)
         }
-        print("[DEBUG] WALL:", wall)
-        return wall
     except Exception as e:
         print(f"[ERROR] fetch_option_wall({symbol}): {e}")
         return None
 
+
 def post_alert(wall, tags, score, webhook):
     title = "📊 Deribit BTC Option Wall " + " ".join(tags)
     color = 16734296 if score >= 5 else 15158332 if "⚠️ Repeated Wall" in tags else 5814783
+
     payload = {
         "username": "Deribit Options Bot",
         "embeds": [{
@@ -72,10 +72,11 @@ def post_alert(wall, tags, score, webhook):
         }]
     }
     try:
-        print(f"[POST] Alerting: {wall['symbol']} Tags: {tags}")
+        print(f"[POST] Alerting {wall['symbol']} Tags: {tags}")
         requests.post(webhook, json=payload)
     except Exception as e:
-        print(f"[ERROR] Discord post failed: {e}")
+        print(f"[ERROR] Failed to post to Discord: {e}")
+
 
 def run_scanner():
     print(f"[{datetime.now(timezone.utc).strftime('%H:%M:%S')}] Scanning Deribit Options Walls...")
@@ -86,7 +87,8 @@ def run_scanner():
         if "-C" in symbol or "-P" in symbol:
             wall = fetch_option_wall(symbol)
             if wall:
-                # REMOVE filter temporarily to test webhook flow
+                print("[DEBUG] WALL:", wall)
+                # You can re-enable filtering here
                 # if is_valid_wall(wall):
                 valid_walls.append(wall)
             time.sleep(0.25)
@@ -96,8 +98,7 @@ def run_scanner():
         return
 
     cluster_strikes = detect_clusters(valid_walls)
-    price_list = [w["last"] for w in valid_walls if w["last"] > 0]
-    current_price = sum(price_list) / max(1, len(price_list))
+    current_price = sum([w["last"] for w in valid_walls if w["last"] > 0]) / max(1, len(valid_walls))
 
     wall_memory = update_wall_memory(valid_walls, current_price)
     export_sniper_wall_snapshot(valid_walls, wall_memory, current_price)
@@ -106,6 +107,7 @@ def run_scanner():
 
     for strike in cluster_strikes:
         save_cluster_strike(strike)
+
     build_heatmap()
 
     for wall in valid_walls:
@@ -115,7 +117,9 @@ def run_scanner():
         is_cluster_repeat = is_repeated_cluster(strike) if is_cluster else False
         score = score_strike(wall)
         sniper_ready = is_high_confluence_sniper(wall["symbol"])
-        rsi_fast = 66  # fake values for trap testing
+
+        # Simulated RSI for now — you can replace with real-time feed
+        rsi_fast = 67
         rsi_slow = 65
         trap = detect_trap_wall(wall, wall_memory, current_price, rsi_fast, rsi_slow)
 
@@ -132,7 +136,7 @@ def run_scanner():
             tags.append("🧠 RSI + Options")
         if trap["is_trap"]:
             tags.append("🚨 Trap Risk")
-            print(trap["reason"])
+            print("[TRAP]", trap["reason"])
         if bias_report["bias"] == "bullish":
             tags.append("🟢 Bullish Bias")
         elif bias_report["bias"] == "bearish":
@@ -140,9 +144,14 @@ def run_scanner():
         elif bias_report["bias"] == "trap_zone":
             tags.append("⚠️ Trap Zone")
 
+        # ✅ Ensure at least one alert gets posted
+        if not tags:
+            tags.append("🔍 TEST MODE")
+
         webhook = WEBHOOK_SNIPER if sniper_ready else WEBHOOK_DEFAULT
         post_alert(wall, tags, score, webhook)
         save_trap(wall)
+
 
 if __name__ == "__main__":
     while True:
