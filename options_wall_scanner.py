@@ -9,10 +9,12 @@ from cluster_memory import save_cluster_strike, is_repeated_cluster
 from heatmap_builder import build_heatmap
 from sniper_score_engine import score_strike
 from rsi_sniper_confluence import is_high_confluence_sniper
+
 from options_wall_memory_tracker import update_wall_memory
 from options_sniper_export import export_sniper_wall_snapshot
+from options_wall_bias_engine import score_wall_bias
 
-# Discord webhooks
+# Discord Webhooks
 WEBHOOK_DEFAULT = "https://discord.com/api/webhooks/1393246400275546352/qao3Rw8BaDDlONOV3zp0_zfYEpNiIRXrEZ-UAGFAMcxK0FT_oJXHkFkic4RenmOUe-4Q"
 WEBHOOK_SNIPER = "https://discord.com/api/webhooks/1394793236932857856/10d2BO33Ckf2ouUQ5ClrnZpbxmzsmERA0SzEEkIwvJe1Rq5GGn0LWLS3vRqTOHwd_Qqc"
 
@@ -24,7 +26,9 @@ BOOK_API = "https://www.deribit.com/api/v2/public/get_book_summary_by_instrument
 def get_live_btc_option_symbols():
     try:
         response = requests.get(INSTRUMENTS_API, params={
-            "currency": "BTC", "kind": "option", "expired": "false"
+            "currency": "BTC",
+            "kind": "option",
+            "expired": "false"
         })
         return [item["instrument_name"] for item in response.json().get("result", [])]
     except Exception as e:
@@ -83,24 +87,25 @@ def run_scanner():
                 valid_walls.append(data)
             time.sleep(0.25)
 
-    # Detect clusters
+    # Detect clusters and calculate price
     cluster_strikes = detect_clusters(valid_walls)
-
-    # Estimate spot price
     price_list = [w["last"] for w in valid_walls if w["last"] > 0]
     current_price = sum(price_list) / max(1, len(price_list))
 
-    # Update wall memory
+    # Track memory and export to sniper system
     wall_memory = update_wall_memory(valid_walls, current_price)
-
-    # Export sniper-friendly JSON
     export_sniper_wall_snapshot(valid_walls, wall_memory, current_price)
 
-    # Save strike clusters
+    # Score wall pressure
+    bias_report = score_wall_bias(current_price, wall_memory)
+    print(f"🧠 Wall Bias: {bias_report['bias']} (Score: {bias_report['score']})")
+
+    # Heatmap + clustering
     for strike in cluster_strikes:
         save_cluster_strike(strike)
     build_heatmap()
 
+    # Process valid walls
     for data in valid_walls:
         strike = extract_strike(data["symbol"])
         is_repeat = is_repeated_trap(data["symbol"])
@@ -120,6 +125,12 @@ def run_scanner():
             tags.append(f"⭐ Score: {score}")
         if sniper_ready:
             tags.append("🧠 RSI + Options")
+        if bias_report["bias"] == "bearish":
+            tags.append("⬇️ Wall Bias: Bearish")
+        elif bias_report["bias"] == "bullish":
+            tags.append("⬆️ Wall Bias: Bullish")
+        elif bias_report["bias"] == "trap_zone":
+            tags.append("⚠️ Trap Zone Detected")
 
         webhook = WEBHOOK_SNIPER if sniper_ready else WEBHOOK_DEFAULT
         post_alert(data, tags, score, webhook)
